@@ -36,6 +36,8 @@ const ctx = canvas.getContext('2d')!
 // Word width cache: font → Map<segment, width>.
 // Persists across prepare() calls. Common words ("the", "a", etc.) are measured
 // once and shared across all text blocks. Survives resize since font doesn't change.
+// No eviction: grows monotonically per font. Typical single-font feed ≈ few KB.
+// Call clearCache() to reclaim if needed (e.g. font change, long session).
 
 const wordCaches = new Map<string, Map<string, number>>()
 
