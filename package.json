@@ -11,6 +11,8 @@
     "check": "tsc && oxlint --type-aware src",
     "gatsby-check": "bun run scripts/gatsby-check.ts",
     "gatsby-check:safari": "GATSBY_CHECK_BROWSER=safari bun run scripts/gatsby-check.ts",
+    "gatsby-sweep": "bun run scripts/gatsby-sweep.ts",
+    "gatsby-sweep:safari": "GATSBY_CHECK_BROWSER=safari bun run scripts/gatsby-sweep.ts",
     "start": "bun --no-hmr pages/*.html"
   },
   "devDependencies": {

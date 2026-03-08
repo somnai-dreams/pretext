@@ -9,6 +9,7 @@ Internal notes for contributors and agents. Use `README.md` as the public source
 - `bun test` — lightweight invariant tests against the shipped implementation
 - `bun run accuracy-check` / `:safari` / `:firefox` — browser accuracy sweeps
 - `bun run gatsby-check` / `:safari` — Gatsby canary diagnostics
+- `bun run gatsby-sweep --start=300 --end=900 --step=10` — fast Gatsby width sweep; add `--diagnose` to rerun mismatching widths through the slow checker
 
 ### Important files
 
@@ -38,6 +39,7 @@ Internal notes for contributors and agents. Use `README.md` as the public source
 - HarfBuzz probes need explicit LTR to avoid wrong direction on isolated Arabic words.
 - Accuracy pages and checkers are now expected to be green in all three installed browsers on fresh runs; if a page disagrees, suspect stale tabs/servers before changing the algorithm.
 - Keep `src/layout.test.ts` small and durable. For browser-specific or narrow hypothesis work, prefer throwaway probes/scripts and promote only the stable invariants into permanent tests.
+- For Gatsby canary work, sweep widths cheaply first and only diagnose the mismatching widths in detail. The slow detailed checker is for narrowing root causes, not for every width by default.
 
 ### Open questions
 
