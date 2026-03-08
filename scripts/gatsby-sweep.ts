@@ -63,6 +63,12 @@ type SweepOptions = {
   output: string | null
 }
 
+type BrowserSession = {
+  navigate: (url: string) => void
+  readReportText: () => string
+  close: () => void
+}
+
 function parseNumberFlag(name: string, fallback: number): number {
   const prefix = `--${name}=`
   const arg = process.argv.find(value => value.startsWith(prefix))
@@ -106,6 +112,14 @@ function parseOptions(): SweepOptions {
 const options = parseOptions()
 const baseUrl = `http://localhost:${options.port}/gatsby`
 
+function runAppleScript(lines: string[]): string {
+  return execFileSync(
+    'osascript',
+    lines.flatMap(line => ['-e', line]),
+    { encoding: 'utf8' },
+  ).trim()
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -127,56 +141,105 @@ async function waitForServer(): Promise<void> {
   throw new Error(`Timed out waiting for local Bun server on ${baseUrl}`)
 }
 
-function navigateBrowser(url: string): void {
-  if (options.browser === 'safari') {
-    execFileSync('osascript', [
-      '-e',
-      'tell application "Safari" to activate',
-      '-e',
-      'tell application "Safari" to if (count of windows) = 0 then make new document',
-      '-e',
-      `tell application "Safari" to set URL of current tab of front window to ${JSON.stringify(url)}`,
-    ], { encoding: 'utf8' })
-    return
-  }
-
-  execFileSync('osascript', [
-    '-e',
-    'tell application "Google Chrome" to activate',
-    '-e',
-    'tell application "Google Chrome" to if (count of windows) = 0 then make new window',
-    '-e',
-    `tell application "Google Chrome" to set URL of active tab of front window to ${JSON.stringify(url)}`,
-  ], { encoding: 'utf8' })
+function extractReportTextFromUrl(url: string): string {
+  const hashIndex = url.indexOf('#report=')
+  if (hashIndex === -1) return ''
+  return decodeURIComponent(url.slice(hashIndex + '#report='.length))
 }
 
-function readBrowserReportText(): string {
-  try {
-    if (options.browser === 'safari') {
-      const url = execFileSync('osascript', [
-        '-e',
-        'tell application "Safari" to get URL of current tab of front window',
-      ], { encoding: 'utf8' }).trim()
-      const hashIndex = url.indexOf('#report=')
-      if (hashIndex === -1) return ''
-      return decodeURIComponent(url.slice(hashIndex + '#report='.length))
-    }
-
-    return execFileSync('osascript', [
-      '-e',
-      'tell application "Google Chrome" to execute active tab of front window javascript "(() => { const el = document.getElementById(\'gatsby-report\'); return el && el.dataset.ready === \'1\' && el.textContent ? el.textContent : \'\'; })()"',
-    ], { encoding: 'utf8' }).trim()
-  } catch {
-    return ''
+function createSafariSession(): BrowserSession {
+  return {
+    navigate(url) {
+      runAppleScript([
+        'tell application "Safari" to activate',
+        'tell application "Safari" to if (count of windows) = 0 then make new document',
+        `tell application "Safari" to set URL of current tab of front window to ${JSON.stringify(url)}`,
+      ])
+    },
+    readReportText() {
+      try {
+        const url = runAppleScript([
+          'tell application "Safari" to get URL of current tab of front window',
+        ])
+        return extractReportTextFromUrl(url)
+      } catch {
+        return ''
+      }
+    },
+    close() {},
   }
 }
 
-async function loadBrowserReport(url: string, expectedRequestId: string): Promise<GatsbyNavigationReport> {
-  navigateBrowser(url)
+function createChromeSession(): BrowserSession {
+  const identifiers = runAppleScript([
+    'tell application "Google Chrome"',
+    'activate',
+    'if (count of windows) = 0 then make new window',
+    'set targetWindow to front window',
+    'set targetTab to make new tab at end of tabs of targetWindow with properties {URL:"about:blank"}',
+    'set active tab index of targetWindow to (count of tabs of targetWindow)',
+    'return (id of targetWindow as string) & "," & (id of targetTab as string)',
+    'end tell',
+  ])
+
+  const [windowIdRaw, tabIdRaw] = identifiers.split(',')
+  const windowId = Number.parseInt(windowIdRaw ?? '', 10)
+  const tabId = Number.parseInt(tabIdRaw ?? '', 10)
+  if (!Number.isFinite(windowId) || !Number.isFinite(tabId)) {
+    throw new Error(`Failed to create Chrome sweep tab: ${identifiers}`)
+  }
+
+  return {
+    navigate(url) {
+      runAppleScript([
+        'tell application "Google Chrome"',
+        `set targetWindow to first window whose id is ${windowId}`,
+        `set URL of (first tab of targetWindow whose id is ${tabId}) to ${JSON.stringify(url)}`,
+        'end tell',
+      ])
+    },
+    readReportText() {
+      try {
+        const url = runAppleScript([
+          'tell application "Google Chrome"',
+          `set targetWindow to first window whose id is ${windowId}`,
+          `return URL of (first tab of targetWindow whose id is ${tabId})`,
+          'end tell',
+        ])
+        return extractReportTextFromUrl(url)
+      } catch {
+        return ''
+      }
+    },
+    close() {
+      try {
+        runAppleScript([
+          'tell application "Google Chrome"',
+          `set targetWindow to first window whose id is ${windowId}`,
+          `close (first tab of targetWindow whose id is ${tabId})`,
+          'end tell',
+        ])
+      } catch {
+        // Ignore cleanup failures if the user already closed the tab/window.
+      }
+    },
+  }
+}
+
+function createBrowserSession(): BrowserSession {
+  return options.browser === 'safari' ? createSafariSession() : createChromeSession()
+}
+
+async function loadBrowserReport(
+  session: BrowserSession,
+  url: string,
+  expectedRequestId: string,
+): Promise<GatsbyNavigationReport> {
+  session.navigate(url)
 
   for (let i = 0; i < 600; i++) {
     await sleep(100)
-    const reportJson = readBrowserReportText()
+    const reportJson = session.readReportText()
     if (reportJson === '' || reportJson === 'null') continue
 
     const report = JSON.parse(reportJson) as GatsbyNavigationReport
@@ -290,6 +353,7 @@ function runDetailedDiagnose(mismatches: SweepMismatch[]): void {
 }
 
 let serverProcess: ReturnType<typeof spawn> | null = null
+let browserSession: BrowserSession | null = null
 
 try {
   if (!(await canReachServer())) {
@@ -300,36 +364,42 @@ try {
     await waitForServer()
   }
 
+  browserSession = createBrowserSession()
   const mismatches: SweepMismatch[] = []
   const widths = getTargetWidths()
 
-  for (const width of widths) {
+  for (let index = 0; index < widths.length; index++) {
+    const width = widths[index]!
     const requestId = `${Date.now()}-${width}-${Math.random().toString(36).slice(2, 8)}`
     const url = `${baseUrl}?report=1&diagnostic=light&width=${width}&requestId=${requestId}`
-    const report = await loadBrowserReport(url, requestId)
+    const report = await loadBrowserReport(browserSession, url, requestId)
 
     if (report.status === 'error') {
       throw new Error(report.message ?? `Gatsby report failed at width ${width}`)
     }
 
     const diffPx = report.diffPx ?? 0
-    if (diffPx === 0) continue
+    if (diffPx !== 0) {
+      mismatches.push({
+        width: report.width ?? width,
+        diffPx,
+        predictedHeight: report.predictedHeight ?? 0,
+        actualHeight: report.actualHeight ?? 0,
+        predictedLineCount: report.predictedLineCount ?? null,
+        browserLineCount: report.browserLineCount ?? null,
+        mismatchCount: report.mismatchCount ?? null,
+        firstBreakMismatch: report.firstBreakMismatch ?? null,
+        firstMismatch: report.firstMismatch ?? null,
+      })
 
-    mismatches.push({
-      width: report.width ?? width,
-      diffPx,
-      predictedHeight: report.predictedHeight ?? 0,
-      actualHeight: report.actualHeight ?? 0,
-      predictedLineCount: report.predictedLineCount ?? null,
-      browserLineCount: report.browserLineCount ?? null,
-      mismatchCount: report.mismatchCount ?? null,
-      firstBreakMismatch: report.firstBreakMismatch ?? null,
-      firstMismatch: report.firstMismatch ?? null,
-    })
+      console.log(
+        `${width}px -> ${formatSignedInt(diffPx)}px | ${report.predictedHeight ?? 0}/${report.actualHeight ?? 0}${report.firstBreakMismatch?.reasonGuess ? ` | ${report.firstBreakMismatch.reasonGuess}` : ''}`,
+      )
+    }
 
-    console.log(
-      `${width}px -> ${formatSignedInt(diffPx)}px | ${report.predictedHeight ?? 0}/${report.actualHeight ?? 0}${report.firstBreakMismatch?.reasonGuess ? ` | ${report.firstBreakMismatch.reasonGuess}` : ''}`,
-    )
+    if ((index + 1) % 50 === 0 || index === widths.length - 1) {
+      console.log(`progress ${index + 1}/${widths.length}`)
+    }
   }
 
   const summary: SweepSummary = {
@@ -346,6 +416,9 @@ try {
   maybeWriteSummary(summary)
   runDetailedDiagnose(mismatches)
 } finally {
+  if (browserSession !== null) {
+    browserSession.close()
+  }
   if (serverProcess !== null) {
     serverProcess.kill('SIGTERM')
   }
