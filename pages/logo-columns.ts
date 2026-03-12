@@ -33,6 +33,10 @@ type SpinState = {
   start: number
   duration: number
 }
+type LogoAnimationState = {
+  angle: number
+  spin: SpinState | null
+}
 
 type PositionedLine = {
   x: number
@@ -70,6 +74,14 @@ type PageLayout = {
   claudeRect: Rect
 }
 
+type LogoHits = { openai: Point[]; claude: Point[] }
+type WrapHulls = {
+  openaiLayout: Point[]
+  claudeLayout: Point[]
+  openaiHit: Point[]
+  claudeHit: Point[]
+}
+
 const stageNode = document.getElementById('stage')
 if (!(stageNode instanceof HTMLDivElement)) throw new Error('#stage not found')
 const stage = stageNode
@@ -85,12 +97,18 @@ type DomCache = {
 
 const preparedByKey = new Map<string, PreparedTextWithSegments>()
 const scheduled = { value: false }
-let currentLogoHits: { openai: Point[], claude: Point[] } | null = null
+const events: { mousemove: MouseEvent | null; click: MouseEvent | null; blur: boolean } = {
+  mousemove: null,
+  click: null,
+  blur: false,
+}
+const pointer = { x: -Infinity, y: -Infinity }
+let currentLogoHits: LogoHits | null = null
 let hoveredLogo: LogoKind | null = null
-let openaiAngle = 0
-let claudeAngle = 0
-let openaiSpin: SpinState | null = null
-let claudeSpin: SpinState | null = null
+const logoAnimations: { openai: LogoAnimationState; claude: LogoAnimationState } = {
+  openai: { angle: 0, spin: null },
+  claude: { angle: 0, spin: null },
+}
 
 const domCache: DomCache = {
   headline: createHeadline(),
@@ -134,6 +152,15 @@ function ensureMounted(): void {
   )
   mounted = true
 }
+
+const [, openaiLayout, claudeLayout, openaiHit, claudeHit] = await Promise.all([
+  document.fonts.ready,
+  getWrapHull(OPENAI_LOGO_SRC, { smoothRadius: 6, mode: 'mean' }),
+  getWrapHull(CLAUDE_LOGO_SRC, { smoothRadius: 6, mode: 'mean' }),
+  getWrapHull(OPENAI_LOGO_SRC, { smoothRadius: 3, mode: 'mean' }),
+  getWrapHull(CLAUDE_LOGO_SRC, { smoothRadius: 5, mode: 'mean' }),
+])
+const wrapHulls: WrapHulls = { openaiLayout, claudeLayout, openaiHit, claudeHit }
 
 function getTypography(): { font: string, lineHeight: number } {
   return { font: BODY_FONT, lineHeight: BODY_LINE_HEIGHT }
@@ -267,21 +294,21 @@ function projectBodyLines(lines: PositionedLine[], className: string, font: stri
   return startIndex + lines.length
 }
 
-function projectStaticLayout(layout: PageLayout): void {
+function projectStaticLayout(layout: PageLayout, pageHeight: number): void {
   ensureMounted()
-  stage.style.height = `${document.documentElement.clientHeight}px`
+  stage.style.height = `${pageHeight}px`
 
   domCache.openaiLogo.style.left = `${layout.openaiRect.x}px`
   domCache.openaiLogo.style.top = `${layout.openaiRect.y}px`
   domCache.openaiLogo.style.width = `${layout.openaiRect.width}px`
   domCache.openaiLogo.style.height = `${layout.openaiRect.height}px`
-  domCache.openaiLogo.style.transform = `rotate(${openaiAngle}rad)`
+  domCache.openaiLogo.style.transform = `rotate(${logoAnimations.openai.angle}rad)`
 
   domCache.claudeLogo.style.left = `${layout.claudeRect.x}px`
   domCache.claudeLogo.style.top = `${layout.claudeRect.y}px`
   domCache.claudeLogo.style.width = `${layout.claudeRect.width}px`
   domCache.claudeLogo.style.height = `${layout.claudeRect.height}px`
-  domCache.claudeLogo.style.transform = `rotate(${claudeAngle}rad)`
+  domCache.claudeLogo.style.transform = `rotate(${logoAnimations.claude.angle}rad)`
 
   domCache.headline.style.left = `${layout.gutter}px`
   domCache.headline.style.top = `${layout.headlineTop}px`
@@ -344,10 +371,9 @@ function fitHeadlineFontSize(headlineWidth: number, pageWidth: number): number {
   return Math.round(best * 10) / 10
 }
 
-function setHoveredLogo(nextHovered: 'openai' | 'claude' | null): void {
+function setHoveredLogo(nextHovered: LogoKind | null): void {
   if (hoveredLogo === nextHovered) return
   hoveredLogo = nextHovered
-  document.body.style.cursor = hoveredLogo === null ? 'default' : 'pointer'
 }
 
 function easeSpin(t: number): number {
@@ -355,53 +381,70 @@ function easeSpin(t: number): number {
   return 1 - oneMinusT * oneMinusT * oneMinusT
 }
 
-function updateSpinState(now: number): boolean {
-  let animating = false
-
-  if (openaiSpin !== null) {
-    const progress = Math.min(1, (now - openaiSpin.start) / openaiSpin.duration)
-    openaiAngle = openaiSpin.from + (openaiSpin.to - openaiSpin.from) * easeSpin(progress)
-    if (progress >= 1) {
-      openaiAngle = openaiSpin.to
-      openaiSpin = null
-    } else {
-      animating = true
-    }
+function getLogoAnimation(kind: LogoKind): LogoAnimationState {
+  switch (kind) {
+    case 'openai':
+      return logoAnimations.openai
+    case 'claude':
+      return logoAnimations.claude
   }
-
-  if (claudeSpin !== null) {
-    const progress = Math.min(1, (now - claudeSpin.start) / claudeSpin.duration)
-    claudeAngle = claudeSpin.from + (claudeSpin.to - claudeSpin.from) * easeSpin(progress)
-    if (progress >= 1) {
-      claudeAngle = claudeSpin.to
-      claudeSpin = null
-    } else {
-      animating = true
-    }
-  }
-
-  return animating
 }
 
-function startLogoSpin(kind: LogoKind, direction: 1 | -1): void {
-  const now = performance.now()
-  const delta = direction * Math.PI
-  if (kind === 'openai') {
-    openaiSpin = {
-      from: openaiAngle,
-      to: openaiAngle + delta,
-      start: now,
-      duration: 900,
-    }
-  } else {
-    claudeSpin = {
-      from: claudeAngle,
-      to: claudeAngle + delta,
-      start: now,
-      duration: 900,
-    }
+function updateLogoSpin(logo: LogoAnimationState, now: number): boolean {
+  if (logo.spin === null) return false
+
+  const progress = Math.min(1, (now - logo.spin.start) / logo.spin.duration)
+  logo.angle = logo.spin.from + (logo.spin.to - logo.spin.from) * easeSpin(progress)
+  if (progress >= 1) {
+    logo.angle = logo.spin.to
+    logo.spin = null
+    return false
   }
-  scheduleRender()
+  return true
+}
+
+function updateSpinState(now: number): boolean {
+  const openaiAnimating = updateLogoSpin(logoAnimations.openai, now)
+  const claudeAnimating = updateLogoSpin(logoAnimations.claude, now)
+  return openaiAnimating || claudeAnimating
+}
+
+function startLogoSpin(kind: LogoKind, direction: 1 | -1, now: number): void {
+  const logo = getLogoAnimation(kind)
+  const delta = direction * Math.PI
+  logo.spin = {
+    from: logo.angle,
+    to: logo.angle + delta,
+    start: now,
+    duration: 900,
+  }
+}
+
+function getLogoProjection(layout: PageLayout, lineHeight: number): {
+  openaiObstacle: BandObstacle
+  claudeObstacle: BandObstacle
+  hits: LogoHits
+} {
+  const openaiWrap = transformWrapPoints(wrapHulls.openaiLayout, layout.openaiRect, logoAnimations.openai.angle)
+  const claudeWrap = transformWrapPoints(wrapHulls.claudeLayout, layout.claudeRect, logoAnimations.claude.angle)
+  return {
+    openaiObstacle: {
+      kind: 'polygon',
+      points: openaiWrap,
+      horizontalPadding: Math.round(lineHeight * 0.82),
+      verticalPadding: Math.round(lineHeight * 0.26),
+    },
+    claudeObstacle: {
+      kind: 'polygon',
+      points: claudeWrap,
+      horizontalPadding: Math.round(lineHeight * 0.28),
+      verticalPadding: Math.round(lineHeight * 0.12),
+    },
+    hits: {
+      openai: transformWrapPoints(wrapHulls.openaiHit, layout.openaiRect, logoAnimations.openai.angle),
+      claude: transformWrapPoints(wrapHulls.claudeHit, layout.claudeRect, logoAnimations.claude.angle),
+    },
+  }
 }
 
 function buildLayout(pageWidth: number, pageHeight: number, lineHeight: number): PageLayout {
@@ -487,35 +530,17 @@ function buildLayout(pageWidth: number, pageHeight: number, lineHeight: number):
   }
 }
 
-async function evaluateLayout(
+function evaluateLayout(
   layout: PageLayout,
   lineHeight: number,
   preparedBody: PreparedTextWithSegments,
-): Promise<{
+): {
   creditLeft: number
   leftLines: PositionedLine[]
   rightLines: PositionedLine[]
-}> {
-  const [openaiHull, claudeHull] = await Promise.all([
-    getWrapHull(domCache.openaiLogo.src, { smoothRadius: 6, mode: 'mean' }),
-    getWrapHull(domCache.claudeLogo.src, { smoothRadius: 6, mode: 'mean' }),
-  ])
-  const openaiWrap = transformWrapPoints(openaiHull, layout.openaiRect, openaiAngle)
-  const claudeWrap = transformWrapPoints(claudeHull, layout.claudeRect, claudeAngle)
-
-  const openaiObstacle: BandObstacle = {
-    kind: 'polygon',
-    points: openaiWrap,
-    horizontalPadding: Math.round(lineHeight * 0.82),
-    verticalPadding: Math.round(lineHeight * 0.26),
-  }
-
-  const claudeObstacle: BandObstacle = {
-    kind: 'polygon',
-    points: claudeWrap,
-    horizontalPadding: Math.round(lineHeight * 0.28),
-    verticalPadding: Math.round(lineHeight * 0.12),
-  }
+  hits: LogoHits
+} {
+  const { openaiObstacle, claudeObstacle, hits } = getLogoProjection(layout, lineHeight)
 
   const titleObstacle: BandObstacle = {
     kind: 'rects',
@@ -567,19 +592,58 @@ async function evaluateLayout(
     creditLeft,
     leftLines: leftResult.lines,
     rightLines: rightResult.lines,
+    hits,
   }
 }
 
-async function render(now = performance.now()): Promise<void> {
+function render(now: number): boolean {
   const { font, lineHeight } = getTypography()
   const root = document.documentElement
   const pageWidth = root.clientWidth
   const pageHeight = root.clientHeight
+
+  // === handle inputs against the previous committed hit geometry
+  if (events.click !== null) {
+    pointer.x = events.click.clientX
+    pointer.y = events.click.clientY
+  }
+  if (events.mousemove !== null) {
+    pointer.x = events.mousemove.clientX
+    pointer.y = events.mousemove.clientY
+  }
+
+  const previousLogoHits = currentLogoHits
+  const nextHovered =
+    events.blur || previousLogoHits === null
+      ? null
+      : isPointInPolygon(previousLogoHits.openai, pointer.x, pointer.y)
+        ? 'openai'
+        : isPointInPolygon(previousLogoHits.claude, pointer.x, pointer.y)
+          ? 'claude'
+          : null
+  setHoveredLogo(nextHovered)
+
+  if (events.click !== null && previousLogoHits !== null) {
+    if (isPointInPolygon(previousLogoHits.openai, pointer.x, pointer.y)) {
+      startLogoSpin('openai', -1, now)
+    } else if (isPointInPolygon(previousLogoHits.claude, pointer.x, pointer.y)) {
+      startLogoSpin('claude', 1, now)
+    }
+  }
+
   const animating = updateSpinState(now)
   const preparedBody = getPrepared(BODY_COPY, font)
   const layout = buildLayout(pageWidth, pageHeight, lineHeight)
-  projectStaticLayout(layout)
-  const { creditLeft, leftLines, rightLines } = await evaluateLayout(layout, lineHeight, preparedBody)
+  const { creditLeft, leftLines, rightLines, hits } = evaluateLayout(layout, lineHeight, preparedBody)
+
+  // === commit state
+  events.mousemove = null
+  events.click = null
+  events.blur = false
+  currentLogoHits = hits
+
+  // === DOM writes
+  projectStaticLayout(layout, pageHeight)
   domCache.credit.style.left = `${creditLeft}px`
   syncPool(domCache.bodyLines, leftLines.length + rightLines.length, () => {
     const element = document.createElement('div')
@@ -589,66 +653,31 @@ async function render(now = performance.now()): Promise<void> {
   let nextIndex = 0
   nextIndex = projectBodyLines(leftLines, 'line line--left', font, lineHeight, nextIndex)
   projectBodyLines(rightLines, 'line line--right', font, lineHeight, nextIndex)
+  document.body.style.cursor = hoveredLogo === null ? 'default' : 'pointer'
 
-  const [openaiHitHull, claudeHitHull] = await Promise.all([
-    getWrapHull(domCache.openaiLogo.src, { smoothRadius: 3, mode: 'mean' }),
-    getWrapHull(domCache.claudeLogo.src, { smoothRadius: 5, mode: 'mean' }),
-  ])
-  currentLogoHits = {
-    openai: transformWrapPoints(openaiHitHull, layout.openaiRect, openaiAngle),
-    claude: transformWrapPoints(claudeHitHull, layout.claudeRect, claudeAngle),
-  }
-
-  if (animating || openaiSpin !== null || claudeSpin !== null) {
-    scheduleRender()
-  }
+  return animating
 }
 
 function scheduleRender(): void {
   if (scheduled.value) return
   scheduled.value = true
-  requestAnimationFrame(() => {
+  requestAnimationFrame(function renderAndMaybeScheduleAnotherRender(now) {
     scheduled.value = false
-    void render()
+    if (render(now)) scheduleRender()
   })
 }
 
 window.addEventListener('resize', scheduleRender)
 document.addEventListener('mousemove', event => {
-  const hits = currentLogoHits
-  if (hits === null) {
-    setHoveredLogo(null)
-    return
-  }
-  const x = event.clientX
-  const y = event.clientY
-  const nextHovered =
-    isPointInPolygon(hits.openai, x, y)
-      ? 'openai'
-      : isPointInPolygon(hits.claude, x, y)
-        ? 'claude'
-        : null
-  setHoveredLogo(nextHovered)
+  events.mousemove = event
+  scheduleRender()
 })
 window.addEventListener('blur', () => {
-  setHoveredLogo(null)
+  events.blur = true
+  scheduleRender()
 })
 document.addEventListener('click', event => {
-  const hits = currentLogoHits
-  if (hits === null) return
-  const x = event.clientX
-  const y = event.clientY
-
-  if (isPointInPolygon(hits.openai, x, y)) {
-    startLogoSpin('openai', -1)
-    return
-  }
-
-  if (isPointInPolygon(hits.claude, x, y)) {
-    startLogoSpin('claude', 1)
-  }
-})
-void document.fonts.ready.then(() => {
+  events.click = event
   scheduleRender()
 })
 scheduleRender()
