@@ -45,6 +45,9 @@ const CREDIT_LINE_HEIGHT = 16
 const HEADLINE_TEXT = 'SITUATIONAL AWARENESS: THE DECADE AHEAD'
 const HEADLINE_FONT_FAMILY = '"Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif'
 const HINT_PILL_SAFE_TOP = 72
+const NARROW_BREAKPOINT = 760
+const NARROW_COLUMN_MAX_WIDTH = 430
+const NARROW_CONTENT_REGION_HEIGHT = 12_000
 
 function resolveImportedAssetUrl(assetUrl: string): string {
   if (/^(?:[a-z]+:)?\/\//i.test(assetUrl) || assetUrl.startsWith('data:') || assetUrl.startsWith('blob:')) {
@@ -93,6 +96,7 @@ type BandObstacle =
     }
 
 type PageLayout = {
+  isNarrow: boolean
   gutter: number
   pageWidth: number
   pageHeight: number
@@ -118,8 +122,11 @@ type WrapHulls = {
 const stageNode = document.getElementById('stage')
 if (!(stageNode instanceof HTMLDivElement)) throw new Error('#stage not found')
 const stage = stageNode
+const pageNode = document.querySelector('.page')
+if (!(pageNode instanceof HTMLElement)) throw new Error('.page not found')
 
 type DomCache = {
+  page: HTMLElement // cache lifetime: page
   headline: HTMLHeadingElement // cache lifetime: page
   credit: HTMLParagraphElement // cache lifetime: page
   openaiLogo: HTMLImageElement // cache lifetime: page
@@ -144,6 +151,7 @@ const logoAnimations: { openai: LogoAnimationState; claude: LogoAnimationState }
 }
 
 const domCache: DomCache = {
+  page: pageNode,
   headline: createHeadline(),
   credit: createCredit(),
   openaiLogo: createLogo('logo logo--openai', 'OpenAI symbol', OPENAI_LOGO_SRC),
@@ -360,8 +368,9 @@ function projectBodyLines(lines: PositionedLine[], className: string, font: stri
   return startIndex + lines.length
 }
 
-function projectStaticLayout(layout: PageLayout, pageHeight: number): void {
-  stage.style.height = `${pageHeight}px`
+function projectStaticLayout(layout: PageLayout, contentHeight: number): void {
+  domCache.page.classList.toggle('page--mobile', layout.isNarrow)
+  stage.style.height = `${contentHeight}px`
 
   domCache.openaiLogo.style.left = `${layout.openaiRect.x}px`
   domCache.openaiLogo.style.top = `${layout.openaiRect.y}px`
@@ -374,6 +383,7 @@ function projectStaticLayout(layout: PageLayout, pageHeight: number): void {
   domCache.claudeLogo.style.width = `${layout.claudeRect.width}px`
   domCache.claudeLogo.style.height = `${layout.claudeRect.height}px`
   domCache.claudeLogo.style.transform = `rotate(${logoAnimations.claude.angle}rad)`
+  domCache.claudeLogo.style.display = 'block'
 
   domCache.headline.style.left = '0px'
   domCache.headline.style.top = '0px'
@@ -481,6 +491,56 @@ function getLogoProjection(layout: PageLayout, lineHeight: number): {
 }
 
 function buildLayout(pageWidth: number, pageHeight: number, lineHeight: number): PageLayout {
+  const isNarrow = pageWidth < NARROW_BREAKPOINT
+  if (isNarrow) {
+    const gutter = Math.round(Math.max(18, Math.min(28, pageWidth * 0.06)))
+    const centerGap = 0
+    const columnWidth = Math.round(Math.min(pageWidth - gutter * 2, NARROW_COLUMN_MAX_WIDTH))
+    const headlineTop = 28
+    const headlineWidth = pageWidth - gutter * 2
+    const headlineFontSize = Math.min(48, fitHeadlineFontSize(headlineWidth, pageWidth))
+    const headlineLineHeight = Math.round(headlineFontSize * 0.92)
+    const headlineFont = `700 ${headlineFontSize}px ${HEADLINE_FONT_FAMILY}`
+    const creditGap = Math.round(Math.max(12, lineHeight * 0.5))
+    const copyGap = Math.round(Math.max(18, lineHeight * 0.7))
+    const claudeSize = Math.round(Math.min(84, pageWidth * 0.21, pageHeight * 0.1))
+    const openaiSize = Math.round(Math.min(138, pageWidth * 0.34))
+    const headlineRegion: Rect = {
+      x: gutter,
+      y: headlineTop,
+      width: headlineWidth,
+      height: Math.max(320, pageHeight - headlineTop - gutter),
+    }
+    const openaiRect: Rect = {
+      x: gutter - Math.round(openaiSize * 0.22),
+      y: pageHeight - gutter - openaiSize + Math.round(openaiSize * 0.08),
+      width: openaiSize,
+      height: openaiSize,
+    }
+    const claudeRect: Rect = {
+      x: pageWidth - gutter - claudeSize,
+      y: 10,
+      width: claudeSize,
+      height: claudeSize,
+    }
+
+    return {
+      isNarrow,
+      gutter,
+      pageWidth,
+      pageHeight,
+      centerGap,
+      columnWidth,
+      headlineRegion,
+      headlineFont,
+      headlineLineHeight,
+      creditGap,
+      copyGap,
+      openaiRect,
+      claudeRect,
+    }
+  }
+
   const gutter = Math.round(Math.max(52, pageWidth * 0.048))
   const centerGap = Math.round(Math.max(28, pageWidth * 0.025))
   const columnWidth = Math.round((pageWidth - gutter * 2 - centerGap) / 2)
@@ -518,6 +578,7 @@ function buildLayout(pageWidth: number, pageHeight: number, lineHeight: number):
   }
 
   return {
+    isNarrow,
     gutter,
     pageWidth,
     pageHeight,
@@ -543,6 +604,7 @@ function evaluateLayout(
   creditTop: number
   leftLines: PositionedLine[]
   rightLines: PositionedLine[]
+  contentHeight: number
   hits: LogoHits
 } {
   const { openaiObstacle, claudeObstacle, hits } = getLogoProjection(layout, lineHeight)
@@ -598,12 +660,17 @@ function evaluateLayout(
     creditRegion.y,
     creditRegion.y + creditRegion.height,
   )
+  const claudeCreditBlocked = getObstacleIntervals(
+    claudeObstacle,
+    creditRegion.y,
+    creditRegion.y + creditRegion.height,
+  )
   const creditSlots = carveTextLineSlots(
     {
       left: creditRegion.x,
       right: creditRegion.x + creditRegion.width,
     },
-    creditBlocked,
+    layout.isNarrow ? creditBlocked.concat(claudeCreditBlocked) : creditBlocked,
   )
   let creditLeft = creditRegion.x
   for (let index = 0; index < creditSlots.length; index++) {
@@ -611,6 +678,45 @@ function evaluateLayout(
     if (slot.right - slot.left >= creditWidth) {
       creditLeft = Math.round(slot.left)
       break
+    }
+  }
+
+  if (layout.isNarrow) {
+    const bodyRegion: Rect = {
+      x: Math.round((layout.pageWidth - layout.columnWidth) / 2),
+      y: copyTop,
+      width: layout.columnWidth,
+      height: NARROW_CONTENT_REGION_HEIGHT,
+    }
+
+    const bodyResult = layoutColumn(
+      preparedBody,
+      { segmentIndex: 0, graphemeIndex: 0 },
+      bodyRegion,
+      lineHeight,
+      [claudeObstacle, openaiObstacle],
+      'left',
+    )
+
+    let contentHeight = Math.max(
+      layout.pageHeight,
+      creditTop + CREDIT_LINE_HEIGHT + layout.gutter,
+      layout.claudeRect.y + layout.claudeRect.height + layout.gutter,
+      layout.openaiRect.y + layout.openaiRect.height + layout.gutter,
+    )
+    if (bodyResult.lines.length > 0) {
+      const lastLine = bodyResult.lines[bodyResult.lines.length - 1]!
+      contentHeight = Math.max(contentHeight, lastLine.y + lineHeight + layout.gutter)
+    }
+
+    return {
+      headlineLines,
+      creditLeft,
+      creditTop,
+      leftLines: bodyResult.lines,
+      rightLines: [],
+      contentHeight,
+      hits,
     }
   }
 
@@ -638,6 +744,7 @@ function evaluateLayout(
     creditTop,
     leftLines: leftResult.lines,
     rightLines: rightResult.lines,
+    contentHeight: layout.pageHeight,
     hits,
   }
 }
@@ -649,11 +756,11 @@ function commitFrame(now: number): boolean {
   const pageHeight = root.clientHeight
   const animating = updateSpinState(now)
   const layout = buildLayout(pageWidth, pageHeight, lineHeight)
-  const { headlineLines, creditLeft, creditTop, leftLines, rightLines, hits } = evaluateLayout(layout, lineHeight, preparedBody)
+  const { headlineLines, creditLeft, creditTop, leftLines, rightLines, contentHeight, hits } = evaluateLayout(layout, lineHeight, preparedBody)
 
   currentLogoHits = hits
 
-  projectStaticLayout(layout, pageHeight)
+  projectStaticLayout(layout, contentHeight)
   projectHeadlineLines(headlineLines, layout.headlineFont, layout.headlineLineHeight)
   domCache.credit.style.left = `${creditLeft}px`
   domCache.credit.style.top = `${creditTop}px`
