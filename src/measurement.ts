@@ -1,4 +1,4 @@
-import { isCJK } from './analysis.ts'
+import { isCJK } from './analysis.js'
 
 export type SegmentMetrics = {
   width: number

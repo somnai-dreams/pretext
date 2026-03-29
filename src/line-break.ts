@@ -1,5 +1,5 @@
-import type { SegmentBreakKind } from './analysis.ts'
-import { getEngineProfile } from './measurement.ts'
+import type { SegmentBreakKind } from './analysis.js'
+import { getEngineProfile } from './measurement.js'
 
 export type LineBreakCursor = {
   segmentIndex: number

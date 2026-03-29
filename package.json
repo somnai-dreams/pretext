@@ -6,15 +6,21 @@
   "publishConfig": {
     "access": "public"
   },
-  "types": "./src/layout.ts",
+  "main": "./dist/layout.js",
+  "types": "./dist/layout.d.ts",
   "exports": {
-    ".": "./src/layout.ts",
+    ".": {
+      "types": "./dist/layout.d.ts",
+      "import": "./dist/layout.js",
+      "default": "./dist/layout.js"
+    },
     "./demos/*": "./pages/demos/*",
     "./assets/*": "./pages/assets/*",
     "./package.json": "./package.json"
   },
   "files": [
     "CHANGELOG.md",
+    "dist",
     "src",
     "!src/layout.test.ts",
     "!src/test-data.ts",
@@ -22,9 +28,6 @@
     "pages/assets",
     "LICENSE"
   ],
-  "peerDependencies": {
-    "typescript": "^5"
-  },
   "scripts": {
     "accuracy-check": "bun run scripts/accuracy-check.ts",
     "accuracy-check:firefox": "ACCURACY_CHECK_BROWSER=firefox bun run scripts/accuracy-check.ts",
@@ -34,6 +37,7 @@
     "accuracy-snapshot:safari": "ACCURACY_CHECK_BROWSER=safari bun run scripts/accuracy-check.ts --full --output=accuracy/safari.json",
     "benchmark-check": "bun run scripts/benchmark-check.ts",
     "benchmark-check:safari": "BENCHMARK_CHECK_BROWSER=safari bun run scripts/benchmark-check.ts",
+    "build:package": "rm -rf dist && tsc -p tsconfig.build.json",
     "check": "tsc && oxlint --type-aware src",
     "corpus-check": "bun run scripts/corpus-check.ts",
     "corpus-check:safari": "CORPUS_CHECK_BROWSER=safari bun run scripts/corpus-check.ts",
@@ -47,6 +51,8 @@
     "gatsby-check:safari": "GATSBY_CHECK_BROWSER=safari bun run scripts/gatsby-check.ts",
     "gatsby-sweep": "bun run scripts/gatsby-sweep.ts",
     "gatsby-sweep:safari": "GATSBY_CHECK_BROWSER=safari bun run scripts/gatsby-sweep.ts",
+    "package-smoke-test": "bun run scripts/package-smoke-test.ts",
+    "prepack": "rm -rf dist && tsc -p tsconfig.build.json",
     "pre-wrap-check": "bun run scripts/pre-wrap-check.ts",
     "probe-check": "bun run scripts/probe-check.ts",
     "probe-check:safari": "PROBE_CHECK_BROWSER=safari bun run scripts/probe-check.ts",
@@ -59,6 +65,7 @@
     "@types/bun": "latest",
     "oxlint": "^1.51.0",
     "oxlint-tsgolint": "^0.15.0",
-    "tsgolint": "^0.0.1"
+    "tsgolint": "^0.0.1",
+    "typescript": "6.0.2"
   }
 }

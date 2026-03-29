@@ -32,7 +32,7 @@
 //
 // Based on Sebastian Markbage's text-layout research (github.com/chenglou/text-layout).
 
-import { computeSegmentLevels } from './bidi.ts'
+import { computeSegmentLevels } from './bidi.js'
 import {
   analyzeText,
   clearAnalysisCaches,
@@ -46,7 +46,7 @@ import {
   type SegmentBreakKind,
   type TextAnalysis,
   type WhiteSpaceMode,
-} from './analysis.ts'
+} from './analysis.js'
 import {
   clearMeasurementCaches,
   getCorrectedSegmentWidth,
@@ -56,13 +56,13 @@ import {
   getSegmentGraphemeWidths,
   getSegmentMetrics,
   textMayContainEmoji,
-} from './measurement.ts'
+} from './measurement.js'
 import {
   countPreparedLines,
   layoutNextLineRange as stepPreparedLineRange,
   walkPreparedLines,
   type InternalLayoutLine,
-} from './line-break.ts'
+} from './line-break.js'
 
 let sharedGraphemeSegmenter: Intl.Segmenter | null = null
 // Rich-path only. Reuses grapheme splits while materializing multiple lines
