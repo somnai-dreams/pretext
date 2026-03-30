@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PreTeX Math Test Page</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #fafafa; padding: 24px; }
+  h1 { margin-bottom: 16px; color: #1e293b; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .card {
+    background: white; border-radius: 8px; padding: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #e5e7eb;
+  }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .card-name { font-weight: 600; font-size: 13px; color: #475569; }
+  .card-mode { font-size: 11px; color: #94a3b8; text-transform: uppercase; }
+  .card-latex { font-size: 12px; color: #64748b; margin-bottom: 10px; font-family: monospace; word-break: break-all; }
+  .card-render { min-height: 30px; display: flex; align-items: center; justify-content: center; padding: 8px; background: #f8fafc; border-radius: 4px; }
+  .card-render canvas { display: block; }
+  .card-error { color: #dc2626; font-size: 12px; }
+</style>
+<script src="./pretex-math.js"></script>
+</head>
+<body>
+<h1>PreTeX Math — All Test Cases</h1>
+<div class="grid" id="grid"></div>
+<script>
+const cases = [
+  // Basic
+  { name: "superscript", latex: "x^2", displayMode: false },
+  { name: "subscript", latex: "a_n", displayMode: false },
+  { name: "complex-superscript", latex: "x^{2n+1}", displayMode: false },
+  { name: "double-subscript", latex: "a_{i,j}", displayMode: false },
+  { name: "super-and-sub", latex: "x_i^2", displayMode: false },
+  { name: "nested-scripts", latex: "e^{x^2}", displayMode: false },
+  { name: "simple-addition", latex: "a + b = c", displayMode: false },
+  { name: "multiplication", latex: "a \\cdot b", displayMode: false },
+  // Fractions
+  { name: "simple-fraction", latex: "\\frac{a}{b}", displayMode: true },
+  { name: "fraction-expressions", latex: "\\frac{x+1}{x-1}", displayMode: true },
+  { name: "dfrac", latex: "\\dfrac{1}{2}", displayMode: true },
+  { name: "nested-fraction", latex: "\\frac{\\frac{a}{b}}{c}", displayMode: true },
+  { name: "double-nested-fraction", latex: "\\frac{1}{1+\\frac{1}{1+\\frac{1}{x}}}", displayMode: true },
+  { name: "fraction-inline", latex: "\\frac{a}{b}", displayMode: false },
+  // Radicals
+  { name: "sqrt", latex: "\\sqrt{x}", displayMode: false },
+  { name: "cube-root", latex: "\\sqrt[3]{x}", displayMode: false },
+  { name: "sqrt-expression", latex: "\\sqrt{x^2+y^2}", displayMode: true },
+  { name: "nested-sqrt", latex: "\\sqrt{\\sqrt{x}}", displayMode: true },
+  // Greek
+  { name: "greek-sum", latex: "\\alpha + \\beta = \\gamma", displayMode: false },
+  { name: "sigma", latex: "\\Sigma", displayMode: false },
+  { name: "pi-r-squared", latex: "\\pi r^2", displayMode: false },
+  { name: "theta-phi", latex: "\\theta + \\phi", displayMode: false },
+  // Operators
+  { name: "summation", latex: "\\sum_{i=0}^{n} x_i", displayMode: true },
+  { name: "integral", latex: "\\int_0^\\infty f(x)\\,dx", displayMode: true },
+  { name: "product", latex: "\\prod_{k=1}^N a_k", displayMode: true },
+  { name: "limit", latex: "\\lim_{x\\to 0} \\frac{\\sin x}{x}", displayMode: true },
+  { name: "summation-inline", latex: "\\sum_{i=0}^{n} x_i", displayMode: false },
+  // Delimiters
+  { name: "parens-fraction", latex: "\\left(\\frac{a}{b}\\right)", displayMode: true },
+  { name: "brackets-sum", latex: "\\left[\\sum_i x_i\\right]", displayMode: true },
+  { name: "set-builder", latex: "\\left\\{x \\mid x > 0\\right\\}", displayMode: true },
+  { name: "abs-value", latex: "\\left|x\\right|", displayMode: false },
+  // Matrices
+  { name: "pmatrix-2x2", latex: "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}", displayMode: true },
+  // Accents
+  { name: "hat", latex: "\\hat{x}", displayMode: false },
+  { name: "bar", latex: "\\bar{y}", displayMode: false },
+  { name: "vec", latex: "\\vec{v}", displayMode: false },
+  { name: "dot", latex: "\\dot{x}", displayMode: false },
+  // Text
+  { name: "text-if", latex: "\\text{if } x > 0", displayMode: false },
+  { name: "text-mixed", latex: "f(x) = x^2 \\text{ for all } x", displayMode: false },
+  // Complex
+  { name: "euler-identity", latex: "e^{i\\pi} + 1 = 0", displayMode: true },
+  { name: "quadratic-formula", latex: "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}", displayMode: true },
+  { name: "cauchy-integral", latex: "f(a) = \\frac{1}{2\\pi i} \\oint_\\gamma \\frac{f(z)}{z-a}\\,dz", displayMode: true },
+  { name: "maxwell-gauss", latex: "\\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\varepsilon_0}", displayMode: true },
+  { name: "binomial-theorem", latex: "(x+y)^n = \\sum_{k=0}^{n} \\binom{n}{k} x^k y^{n-k}", displayMode: true },
+  { name: "taylor-series", latex: "f(x) = \\sum_{n=0}^{\\infty} \\frac{f^{(n)}(a)}{n!}(x-a)^n", displayMode: true },
+  // Edge cases
+  { name: "empty-group", latex: "x^{}", displayMode: false },
+  { name: "deeply-nested", latex: "\\frac{\\frac{\\frac{a}{b}}{\\frac{c}{d}}}{\\frac{e}{f}}", displayMode: true },
+  { name: "long-subscript-chain", latex: "x_{a_{b_{c_{d}}}}", displayMode: false },
+  { name: "single-char", latex: "x", displayMode: false },
+  { name: "single-number", latex: "42", displayMode: false },
+  { name: "negative-number", latex: "-1", displayMode: false },
+];
+
+const grid = document.getElementById("grid");
+const FONT_SIZE = 32;
+
+for (const tc of cases) {
+  const card = document.createElement("div");
+  card.className = "card";
+
+  const header = document.createElement("div");
+  header.className = "card-header";
+  header.innerHTML = `<span class="card-name">${tc.name}</span><span class="card-mode">${tc.displayMode ? "display" : "inline"}</span>`;
+
+  const latex = document.createElement("div");
+  latex.className = "card-latex";
+  latex.textContent = tc.latex;
+
+  const render = document.createElement("div");
+  render.className = "card-render";
+
+  try {
+    const result = PreTeX.renderMathToCanvas(tc.latex, FONT_SIZE, {
+      displayStyle: tc.displayMode,
+    });
+    render.appendChild(result.canvas);
+  } catch (e) {
+    render.innerHTML = `<span class="card-error">Error: ${e.message}</span>`;
+  }
+
+  card.appendChild(header);
+  card.appendChild(latex);
+  card.appendChild(render);
+  grid.appendChild(card);
+}
+</script>
+</body>
+</html>

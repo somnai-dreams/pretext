@@ -1,0 +1,6 @@
+# Generated artifacts — regenerate with the test scripts
+references/
+output/
+pretex-math.js
+report.html
+results.json
