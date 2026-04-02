@@ -153,6 +153,11 @@ describe('prepare invariants', () => {
     expect(prepared.kinds).toEqual(['text', 'hard-break', 'text'])
   })
 
+  test('pre-wrap mode also normalizes CRLF on the simple prepare path', () => {
+    const prepared = prepare('Hello\r\nWorld', FONT, { whiteSpace: 'pre-wrap' })
+    expect(layout(prepared, 200, LINE_HEIGHT).lineCount).toBe(2)
+  })
+
   test('pre-wrap mode keeps tabs as explicit segments', () => {
     const prepared = prepareWithSegments('Hello\tWorld', FONT, { whiteSpace: 'pre-wrap' })
     expect(prepared.segments).toEqual(['Hello', '\t', 'World'])
