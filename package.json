@@ -65,6 +65,7 @@
     "@types/bun": "latest",
     "oxlint": "^1.51.0",
     "oxlint-tsgolint": "^0.15.0",
+    "playwright": "^1.58.2",
     "tsgolint": "^0.0.1",
     "typescript": "6.0.2"
   }
